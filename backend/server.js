@@ -7,7 +7,7 @@ const connectDB = require("./config/DB");
 
 const authRouter = require("./routes/auth.routes");
 const projectRouter = require("./routes/project.routes");
-const taskRouter = require("./routes/task.routes");
+// const taskRouter = require("./routes/task.routes");
 const errorHandler = require("./middleware/error.handler");
 
 connectDB();
@@ -23,7 +23,7 @@ app.get("/", (req, res) => {
 
 app.use("/api/auth", authRouter);
 app.use("/api/project", projectRouter);
-app.use("/api/task", taskRouter);
+// app.use("/api/task", taskRouter);
 
 app.use(errorHandler);
 

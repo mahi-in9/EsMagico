@@ -1,14 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { createProject, getProjects } from "../app/slice/projectSlice";
-import { Link } from "react-router-dom";
+import { createTask, getTasks } from "../app/slice/taskSlice";
 
-function Project() {
+function Task() {
   const dispatch = useDispatch();
 
-  const { projects, projectLoading, projectError } = useSelector(
-    (state) => state.project,
-  );
+  const { tasks, loading, error } = useSelector((state) => state.task);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -17,12 +14,10 @@ function Project() {
 
   const [showForm, setShowForm] = useState(false);
 
-  // Fetch projects
+  // Fetch tasks
   useEffect(() => {
-    dispatch(getProjects());
+    dispatch(getTasks());
   }, [dispatch]);
-
-  console.log(projects);
 
   // Handle input
   const handleChange = (e) => {
@@ -36,16 +31,14 @@ function Project() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    try {
-      let res = await dispatch(createProject(formData)).unwrap();
-      console.log(res);
-    } catch (error) {
-      console.log(error);
+    if (!formData.title.trim() || !formData.description.trim()) return;
+
+    const result = await dispatch(createTask(formData));
+
+    if (createTask.fulfilled.match(result)) {
+      setFormData({ title: "", description: "" });
+      setShowForm(false);
     }
-    setShowForm({
-      title: "",
-      description: "",
-    });
   };
 
   return (
@@ -53,24 +46,24 @@ function Project() {
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-semibold">Projects</h1>
+          <h1 className="text-2xl font-semibold">Tasks</h1>
 
           <button
             onClick={() => setShowForm((prev) => !prev)}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
           >
-            {showForm ? "Cancel" : "New Project"}
+            {showForm ? "Cancel" : "New Task"}
           </button>
         </div>
 
-        {/* Create Form */}
+        {/* Create Task Form */}
         {showForm && (
           <div className="bg-white p-5 rounded-lg shadow mb-6">
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <input
                 type="text"
                 name="title"
-                placeholder="Project Title"
+                placeholder="Task Title"
                 value={formData.title}
                 onChange={handleChange}
                 className="px-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500"
@@ -78,7 +71,7 @@ function Project() {
 
               <textarea
                 name="description"
-                placeholder="Project Description"
+                placeholder="Task Description"
                 value={formData.description}
                 onChange={handleChange}
                 className="px-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500"
@@ -86,46 +79,44 @@ function Project() {
 
               <button
                 type="submit"
-                className="bg-green-600 text-white py-2 rounded-md hover:bg-green-700"
+                disabled={loading}
+                className="bg-green-600 text-white py-2 rounded-md hover:bg-green-700 disabled:opacity-50"
               >
-                Create
+                {loading ? "Creating..." : "Create Task"}
               </button>
             </form>
           </div>
         )}
 
-        {/* Loading */}
-        {projectLoading && (
-          <p className="text-center text-gray-600">Loading projects...</p>
-        )}
-
-        {/* Error */}
-        {projectError && (
+        {/* Status Handling */}
+        {loading ? (
+          <p className="text-center text-gray-600">Loading tasks...</p>
+        ) : error ? (
           <p className="text-center text-red-500">
-            {projectError?.message || "Failed to load projects"}
+            {error?.message || "Failed to load tasks"}
           </p>
-        )}
-
-        {/* Project List */}
-        {!projectLoading && projects?.length === 0 && (
+        ) : tasks?.length === 0 ? (
           <p className="text-center text-gray-500">
-            No projects found. Create your first project.
+            No tasks found. Create your first task.
           </p>
-        )}
+        ) : null}
 
+        {/* Task List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects?.map((project) => (
-            <Link
-              to={"/project-details"}
-              key={project._id}
-              className="bg-white p-4 rounded-lg shadow hover:shadow-md transition cursor-pointer"
+          {tasks?.map((task) => (
+            <div
+              key={task._id}
+              className="bg-white p-4 rounded-lg shadow hover:shadow-md transition"
             >
-              <h2 className="text-lg font-semibold mb-1">{project.title}</h2>
+              <h2 className="text-lg font-semibold mb-1">{task.title}</h2>
 
-              <p className="text-sm text-gray-600 mb-3">
-                {project.description}
-              </p>
-            </Link>
+              <p className="text-sm text-gray-600 mb-3">{task.description}</p>
+
+              <div className="text-xs text-gray-500 flex justify-between">
+                <span>Status: {task.status || "Pending"}</span>
+                <span>Priority: {task.priority || "Low"}</span>
+              </div>
+            </div>
           ))}
         </div>
       </div>
@@ -133,4 +124,4 @@ function Project() {
   );
 }
 
-export default Project;
+export default Task;

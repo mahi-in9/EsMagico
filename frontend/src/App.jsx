@@ -4,6 +4,8 @@ import Signup from "./pages/Signup";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Project from "./pages/Project";
+import Task from "./pages/Task";
+import ProjectDetails from "./pages/ProjectDetails";
 
 function App() {
   return (
@@ -16,6 +18,8 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/project" element={<Project />} />
+          <Route path="/project/:projectId" element={<ProjectDetails />} />
+          <Route path="/tasks" element={<Task />} />
         </Routes>
       </main>
     </div>
