@@ -124,7 +124,7 @@ const forgotPasswordControllers = async (req, res) => {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
     const mailOptions = {
-      from: `"HabitLeaf Team" <${process.env.EMAIL_USER}>`,
+      from: `"ES-Magico Team" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: "Reset Your Password - HabitLeaf",
       html: `

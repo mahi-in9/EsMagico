@@ -39,6 +39,14 @@ const projectSchema = new mongoose.Schema(
         ref: "Task",
       },
     ],
+    inviteToken: {
+      type: String,
+      default: null,
+    },
+    inviteTokenExpiry: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

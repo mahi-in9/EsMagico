@@ -6,15 +6,49 @@ const taskSchema = new mongoose.Schema(
     description: { type: String, required: true },
 
     priority: {
-      type: String,
-      enum: ["low", "medium", "high"],
-      default: "low",
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 3,
+    },
+
+    estimatedHours: {
+      type: Number,
+      required: true,
+      default: 1,
     },
 
     status: {
       type: String,
       enum: ["Pending", "Running", "Completed", "Failed", "Blocked"],
       default: "Pending",
+    },
+
+    dependencies: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Task",
+      },
+    ],
+
+    resourceTag: {
+      type: String,
+      default: "",
+    },
+
+    maxRetries: {
+      type: Number,
+      default: 3,
+    },
+
+    retryCount: {
+      type: Number,
+      default: 0,
+    },
+
+    versionNumber: {
+      type: Number,
+      default: 1,
     },
 
     user: {
