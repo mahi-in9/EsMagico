@@ -1,14 +1,12 @@
 /**
  * 🔧 EXECUTION ENGINE - THE HEART OF THE SYSTEM
  *
- * This is where the magic happens.
  * All logic for DAG, sorting, planning, simulation lives here.
  *
  * RULES:
  * 1. No database calls - pure functions only
  * 2. No side effects
  * 3. 100% testable
- * 4. Beginner friendly comments
  */
 
 /**
