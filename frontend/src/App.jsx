@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchUser } from "./app/slice/authSlice";
+import { fetchUser, setAuthChecked } from "./app/slice/authSlice";
 
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
@@ -37,7 +37,15 @@ function App() {
   const { isAuthChecked } = useSelector((s) => s.auth);
 
   useEffect(() => {
-    if (!isAuthChecked && localStorage.getItem("token")) dispatch(fetchUser());
+    if (!isAuthChecked) {
+      if (localStorage.getItem("token")) {
+        // Token exists, fetch the user data
+        dispatch(fetchUser());
+      } else {
+        // No token exists, instantly tell the app we are done checking!
+        dispatch(setAuthChecked());
+      }
+    }
   }, [dispatch, isAuthChecked]);
 
   return (
