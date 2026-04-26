@@ -1,32 +1,32 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import api from "../../api/api";
 
-const createTask = createAsyncThunk(
-  "task/createTask",
+export const createTask = createAsyncThunk(
+  "task/create",
   async ({ projectId, taskData }, thunkApi) => {
     try {
       const res = await api.post(`/api/project/${projectId}/task`, taskData);
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const getTasks = createAsyncThunk(
-  "task/getTasks",
+export const getTasks = createAsyncThunk(
+  "task/getAll",
   async (projectId, thunkApi) => {
     try {
       const res = await api.get(`/api/project/${projectId}/task`);
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const updateTask = createAsyncThunk(
-  "task/updateTask",
+export const updateTask = createAsyncThunk(
+  "task/update",
   async ({ projectId, taskId, taskData }, thunkApi) => {
     try {
       const res = await api.put(
@@ -34,15 +34,14 @@ const updateTask = createAsyncThunk(
         taskData,
       );
       return res.data.data;
-    } catch (error) {
-      // 409 = version conflict — pass it through so the UI can handle it
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const updateTaskStatus = createAsyncThunk(
-  "task/updateTaskStatus",
+export const updateTaskStatus = createAsyncThunk(
+  "task/updateStatus",
   async ({ projectId, taskId, status }, thunkApi) => {
     try {
       const res = await api.patch(
@@ -50,165 +49,168 @@ const updateTaskStatus = createAsyncThunk(
         { status },
       );
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const retryTask = createAsyncThunk(
-  "task/retryTask",
+export const retryTask = createAsyncThunk(
+  "task/retry",
   async ({ projectId, taskId }, thunkApi) => {
     try {
       const res = await api.post(
         `/api/project/${projectId}/task/${taskId}/retry`,
       );
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const deleteTask = createAsyncThunk(
-  "task/deleteTask",
+export const deleteTask = createAsyncThunk(
+  "task/delete",
   async ({ projectId, taskId }, thunkApi) => {
     try {
       await api.delete(`/api/project/${projectId}/task/${taskId}`);
-      return taskId; // return id so we can remove from state
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+      return taskId;
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const initialState = {
-  tasks: [],
-  loading: false,
-  error: null,
-  conflictError: null, // separate field for 409 version conflicts
+export const getTaskHistory = createAsyncThunk(
+  "task/history",
+  async ({ projectId, taskId }, thunkApi) => {
+    try {
+      const res = await api.get(
+        `/api/project/${projectId}/task/${taskId}/history`,
+      );
+      return { taskId, history: res.data.data };
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
+    }
+  },
+);
+
+const upsertTask = (state, task) => {
+  const idx = state.tasks.findIndex((t) => t._id === task._id);
+  if (idx !== -1) state.tasks[idx] = task;
+  else state.tasks.push(task);
 };
 
 const taskSlice = createSlice({
   name: "task",
-  initialState,
+  initialState: {
+    tasks: [],
+    taskHistory: [],
+    loading: false,
+    error: null,
+    conflictError: null,
+  },
   reducers: {
-    clearConflictError(state) {
+    clearConflictError: (state) => {
       state.conflictError = null;
     },
-    // Called by WebSocket to add a task from another user
-    taskAddedFromSocket(state, action) {
-      const exists = state.tasks.find((t) => t._id === action.payload._id);
-      if (!exists) state.tasks.push(action.payload);
+    clearTaskError: (state) => {
+      state.error = null;
     },
-    // Called by WebSocket when another user updates a task
-    taskUpdatedFromSocket(state, action) {
-      const index = state.tasks.findIndex((t) => t._id === action.payload._id);
-      if (index !== -1) state.tasks[index] = action.payload;
+    // Socket-driven reducers
+    socketTaskCreated: (state, a) => {
+      upsertTask(state, a.payload);
+    },
+    socketTaskUpdated: (state, a) => {
+      upsertTask(state, a.payload);
+    },
+    socketTaskStatusChanged: (state, a) => {
+      const { taskId, status, task } = a.payload;
+      const idx = state.tasks.findIndex(
+        (t) => t._id === taskId || t._id === taskId?.toString(),
+      );
+      if (idx !== -1) {
+        if (task) state.tasks[idx] = task;
+        else state.tasks[idx].status = status;
+      }
+    },
+    socketTaskDeleted: (state, a) => {
+      state.tasks = state.tasks.filter(
+        (t) =>
+          t._id !== a.payload.taskId && t._id !== a.payload.taskId?.toString(),
+      );
     },
   },
   extraReducers: (builder) => {
-    // createTask
     builder
       .addCase(createTask.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(createTask.fulfilled, (state, action) => {
+      .addCase(createTask.fulfilled, (state, a) => {
         state.loading = false;
-        state.tasks.push(action.payload);
+        if (a.payload) state.tasks.push(a.payload);
       })
-      .addCase(createTask.rejected, (state, action) => {
+      .addCase(createTask.rejected, (state, a) => {
         state.loading = false;
-        state.error = action.payload;
-      });
-
-    // getTasks
-    builder
+        state.error = a.payload;
+      })
       .addCase(getTasks.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(getTasks.fulfilled, (state, action) => {
+      .addCase(getTasks.fulfilled, (state, a) => {
         state.loading = false;
-        state.tasks = action.payload;
+        state.tasks = a.payload || [];
       })
-      .addCase(getTasks.rejected, (state, action) => {
+      .addCase(getTasks.rejected, (state, a) => {
         state.loading = false;
-        state.error = action.payload;
-      });
-
-    // updateTask
-    builder
+        state.error = a.payload;
+      })
       .addCase(updateTask.pending, (state) => {
         state.loading = true;
-        state.error = null;
         state.conflictError = null;
       })
-      .addCase(updateTask.fulfilled, (state, action) => {
+      .addCase(updateTask.fulfilled, (state, a) => {
         state.loading = false;
-        const index = state.tasks.findIndex(
-          (t) => t._id === action.payload._id,
-        );
-        if (index !== -1) state.tasks[index] = action.payload;
+        if (a.payload) upsertTask(state, a.payload);
       })
-      .addCase(updateTask.rejected, (state, action) => {
+      .addCase(updateTask.rejected, (state, a) => {
         state.loading = false;
-        // Check if it's a 409 conflict
-        if (action.payload?.message?.includes("conflict")) {
-          state.conflictError = action.payload;
-        } else {
-          state.error = action.payload;
-        }
-      });
-
-    // updateTaskStatus
-    builder
-      .addCase(updateTaskStatus.fulfilled, (state, action) => {
-        const index = state.tasks.findIndex(
-          (t) => t._id === action.payload._id,
-        );
-        if (index !== -1) state.tasks[index] = action.payload;
+        if (a.payload?.message?.toLowerCase().includes("conflict"))
+          state.conflictError = a.payload;
+        else state.error = a.payload;
       })
-      .addCase(updateTaskStatus.rejected, (state, action) => {
-        state.error = action.payload;
-      });
-
-    // retryTask
-    builder
-      .addCase(retryTask.fulfilled, (state, action) => {
-        const index = state.tasks.findIndex(
-          (t) => t._id === action.payload._id,
-        );
-        if (index !== -1) state.tasks[index] = action.payload;
+      .addCase(updateTaskStatus.fulfilled, (state, a) => {
+        if (a.payload) upsertTask(state, a.payload);
       })
-      .addCase(retryTask.rejected, (state, action) => {
-        state.error = action.payload;
-      });
-
-    // deleteTask
-    builder
-      .addCase(deleteTask.fulfilled, (state, action) => {
-        state.tasks = state.tasks.filter((t) => t._id !== action.payload);
+      .addCase(updateTaskStatus.rejected, (state, a) => {
+        state.error = a.payload;
       })
-      .addCase(deleteTask.rejected, (state, action) => {
-        state.error = action.payload;
+      .addCase(retryTask.fulfilled, (state, a) => {
+        if (a.payload) upsertTask(state, a.payload);
+      })
+      .addCase(retryTask.rejected, (state, a) => {
+        state.error = a.payload;
+      })
+      .addCase(deleteTask.fulfilled, (state, a) => {
+        state.tasks = state.tasks.filter((t) => t._id !== a.payload);
+      })
+      .addCase(deleteTask.rejected, (state, a) => {
+        state.error = a.payload;
+      })
+      .addCase(getTaskHistory.fulfilled, (state, a) => {
+        state.taskHistory = a.payload?.history || [];
       });
   },
 });
 
 export const {
   clearConflictError,
-  taskAddedFromSocket,
-  taskUpdatedFromSocket,
+  clearTaskError,
+  socketTaskCreated,
+  socketTaskUpdated,
+  socketTaskStatusChanged,
+  socketTaskDeleted,
 } = taskSlice.actions;
-
-export {
-  createTask,
-  getTasks,
-  updateTask,
-  updateTaskStatus,
-  retryTask,
-  deleteTask,
-};
 export default taskSlice.reducer;

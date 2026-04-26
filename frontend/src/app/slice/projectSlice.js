@@ -1,62 +1,110 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import api from "../../api/api";
 
-const createProject = createAsyncThunk(
-  "project/createProject",
-  async (projectData, thunkApi) => {
+export const createProject = createAsyncThunk(
+  "project/create",
+  async (data, thunkApi) => {
     try {
-      const res = await api.post("/api/project", projectData);
+      const res = await api.post("/api/project", data);
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const getProjects = createAsyncThunk(
-  "project/getProjects",
+export const getProjects = createAsyncThunk(
+  "project/getAll",
   async (_, thunkApi) => {
     try {
       const res = await api.get("/api/project");
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const getProjectById = createAsyncThunk(
-  "project/getProjectById",
-  async (projectId, thunkApi) => {
+export const getProjectById = createAsyncThunk(
+  "project/getById",
+  async (id, thunkApi) => {
     try {
-      const res = await api.get(`/api/project/${projectId}`);
+      const res = await api.get(`/api/project/${id}`);
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const generateInvite = createAsyncThunk(
+export const generateInvite = createAsyncThunk(
   "project/generateInvite",
-  async (projectId, thunkApi) => {
+  async (id, thunkApi) => {
     try {
-      const res = await api.post(`/api/project/${projectId}/invite`);
-      return res.data.data; // { inviteToken }
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+      const res = await api.post(`/api/project/${id}/invite`);
+      return res.data.data;
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
 
-const joinProject = createAsyncThunk(
-  "project/joinProject",
+export const joinProject = createAsyncThunk(
+  "project/join",
   async (token, thunkApi) => {
     try {
       const res = await api.post(`/api/project/join/${token}`);
       return res.data.data;
-    } catch (error) {
-      return thunkApi.rejectWithValue(error?.response?.data);
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
+    }
+  },
+);
+
+export const computeExecution = createAsyncThunk(
+  "project/computeExecution",
+  async (id, thunkApi) => {
+    try {
+      const res = await api.post(`/api/project/${id}/compute-execution`);
+      return res.data.data;
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
+    }
+  },
+);
+
+export const runSimulation = createAsyncThunk(
+  "project/simulate",
+  async ({ id, body }, thunkApi) => {
+    try {
+      const res = await api.post(`/api/project/${id}/simulate`, body);
+      return res.data.data;
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
+    }
+  },
+);
+
+export const getAuditLogs = createAsyncThunk(
+  "project/auditLogs",
+  async (id, thunkApi) => {
+    try {
+      const res = await api.get(`/api/project/${id}/audit-logs`);
+      return res.data.data;
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
+    }
+  },
+);
+
+export const updateWebhook = createAsyncThunk(
+  "project/updateWebhook",
+  async ({ id, webhookUrl }, thunkApi) => {
+    try {
+      const res = await api.put(`/api/project/${id}/webhook`, { webhookUrl });
+      return { id, webhookUrl };
+    } catch (e) {
+      return thunkApi.rejectWithValue(e?.response?.data);
     }
   },
 );
@@ -67,89 +115,97 @@ const projectSlice = createSlice({
     projects: [],
     currentProject: null,
     inviteToken: null,
+    executionPlan: null,
+    simulationResult: null,
+    auditLogs: [],
     projectLoading: false,
+    actionLoading: false,
     projectError: null,
   },
   reducers: {
-    clearInviteToken(state) {
+    clearInviteToken: (state) => {
       state.inviteToken = null;
     },
-    clearCurrentProject(state) {
-      state.currentProject = null;
+    clearExecutionPlan: (state) => {
+      state.executionPlan = null;
+    },
+    clearSimulation: (state) => {
+      state.simulationResult = null;
+    },
+    clearProjectError: (state) => {
+      state.projectError = null;
     },
   },
   extraReducers: (builder) => {
-    // createProject
     builder
-      .addCase(createProject.pending, (state) => {
-        state.projectLoading = true;
-        state.projectError = null;
+      .addCase(createProject.fulfilled, (state, a) => {
+        state.projects.push(a.payload);
       })
-      .addCase(createProject.fulfilled, (state, action) => {
-        state.projectLoading = false;
-        state.projects.push(action.payload);
-      })
-      .addCase(createProject.rejected, (state, action) => {
-        state.projectLoading = false;
-        state.projectError = action.payload;
-      });
-
-    // getProjects
-    builder
       .addCase(getProjects.pending, (state) => {
         state.projectLoading = true;
         state.projectError = null;
       })
-      .addCase(getProjects.fulfilled, (state, action) => {
+      .addCase(getProjects.fulfilled, (state, a) => {
         state.projectLoading = false;
-        state.projects = action.payload;
+        state.projects = a.payload || [];
       })
-      .addCase(getProjects.rejected, (state, action) => {
+      .addCase(getProjects.rejected, (state, a) => {
         state.projectLoading = false;
-        state.projectError = action.payload;
-      });
-
-    // getProjectById
-    builder
+        state.projectError = a.payload;
+      })
       .addCase(getProjectById.pending, (state) => {
         state.projectLoading = true;
-        state.projectError = null;
       })
-      .addCase(getProjectById.fulfilled, (state, action) => {
+      .addCase(getProjectById.fulfilled, (state, a) => {
         state.projectLoading = false;
-        state.currentProject = action.payload;
+        state.currentProject = a.payload;
       })
-      .addCase(getProjectById.rejected, (state, action) => {
+      .addCase(getProjectById.rejected, (state, a) => {
         state.projectLoading = false;
-        state.projectError = action.payload;
-      });
-
-    // generateInvite
-    builder
-      .addCase(generateInvite.fulfilled, (state, action) => {
-        state.inviteToken = action.payload.inviteToken;
+        state.projectError = a.payload;
       })
-      .addCase(generateInvite.rejected, (state, action) => {
-        state.projectError = action.payload;
-      });
-
-    // joinProject
-    builder
-      .addCase(joinProject.fulfilled, (state, action) => {
-        state.projects.push(action.payload);
+      .addCase(generateInvite.fulfilled, (state, a) => {
+        state.inviteToken = a.payload?.inviteToken;
       })
-      .addCase(joinProject.rejected, (state, action) => {
-        state.projectError = action.payload;
+      .addCase(joinProject.fulfilled, (state, a) => {
+        if (a.payload) state.projects.push(a.payload);
+      })
+      .addCase(computeExecution.pending, (state) => {
+        state.actionLoading = true;
+      })
+      .addCase(computeExecution.fulfilled, (state, a) => {
+        state.actionLoading = false;
+        state.executionPlan = a.payload;
+      })
+      .addCase(computeExecution.rejected, (state, a) => {
+        state.actionLoading = false;
+        state.projectError = a.payload;
+      })
+      .addCase(runSimulation.pending, (state) => {
+        state.actionLoading = true;
+      })
+      .addCase(runSimulation.fulfilled, (state, a) => {
+        state.actionLoading = false;
+        state.simulationResult = a.payload;
+      })
+      .addCase(runSimulation.rejected, (state, a) => {
+        state.actionLoading = false;
+        state.projectError = a.payload;
+      })
+      .addCase(getAuditLogs.fulfilled, (state, a) => {
+        state.auditLogs = a.payload || [];
+      })
+      .addCase(updateWebhook.fulfilled, (state, a) => {
+        if (state.currentProject?._id === a.payload.id)
+          state.currentProject.webhookUrl = a.payload.webhookUrl;
       });
   },
 });
 
-export const { clearInviteToken, clearCurrentProject } = projectSlice.actions;
-export {
-  createProject,
-  getProjects,
-  getProjectById,
-  generateInvite,
-  joinProject,
-};
+export const {
+  clearInviteToken,
+  clearExecutionPlan,
+  clearSimulation,
+  clearProjectError,
+} = projectSlice.actions;
 export default projectSlice.reducer;

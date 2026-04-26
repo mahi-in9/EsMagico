@@ -1,94 +1,113 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchUser } from "../app/slice/authSlice";
 import { useNavigate } from "react-router-dom";
+import { getProjects } from "../app/slice/projectSlice";
+import { getTasks } from "../app/slice/taskSlice";
+
+const StatCard = ({ label, value, color }) => (
+  <div className={`bg-white p-5 rounded-xl shadow border-l-4 ${color}`}>
+    <p className="text-sm text-gray-500">{label}</p>
+    <h2 className="text-3xl font-bold mt-1">{value}</h2>
+  </div>
+);
 
 const Home = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { user } = useSelector((s) => s.auth);
+  const { projects } = useSelector((s) => s.project);
 
-  const { user, loading, isAuthChecked } = useSelector((state) => state.auth);
-
-  // Bootstrap auth on page load
   useEffect(() => {
-    if (!isAuthChecked) {
-      dispatch(fetchUser());
-    }
-  }, [dispatch, isAuthChecked]);
+    dispatch(getProjects());
+  }, [dispatch]);
 
-  // Redirect if not logged in
-  useEffect(() => {
-    if (isAuthChecked && !user) {
-      navigate("/login");
-    }
-  }, [user, isAuthChecked, navigate]);
+  const allTaskCounts = { total: 0, running: 0, completed: 0, failed: 0 };
 
-  // Loading state (important to avoid flicker)
-  if (!isAuthChecked || loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-gray-600 text-lg">Loading...</p>
-      </div>
-    );
-  }
-
-  // Main dashboard UI
   return (
-    <div className="h-full bg-gray-100 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold">
-            Welcome, {user?.name || "User"}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">
+            Welcome, {user?.name} 👋
           </h1>
-          <p className="text-gray-600 text-sm">
-            Manage your projects and tasks efficiently
+          <p className="text-gray-500 mt-1">
+            Manage your workflow orchestration projects
           </p>
         </div>
 
-        {/* Stats Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-500">Total Projects</p>
-            <h2 className="text-xl font-semibold">0</h2>
-          </div>
-
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-500">Active Tasks</p>
-            <h2 className="text-xl font-semibold">0</h2>
-          </div>
-
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-500">Completed Tasks</p>
-            <h2 className="text-xl font-semibold">0</h2>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <StatCard
+            label="Total Projects"
+            value={projects?.length || 0}
+            color="border-blue-500"
+          />
+          <StatCard
+            label="Active Projects"
+            value={projects?.length || 0}
+            color="border-green-500"
+          />
+          <StatCard
+            label="You are"
+            value={user?.role || "user"}
+            color="border-purple-500"
+          />
+          <StatCard label="Account" value="Active" color="border-teal-500" />
         </div>
 
-        {/* Quick Actions */}
-        <div className="bg-white p-6 rounded-lg shadow mb-6">
-          <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
-
-          <div className="flex gap-4 flex-wrap">
-            <button
-              onClick={() => navigate("/projects")}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              Create Project
-            </button>
-
-            <button
-              onClick={() => navigate("/tasks")}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-            >
-              Create Task
-            </button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow">
+            <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => navigate("/project")}
+                className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-left font-medium transition"
+              >
+                📁 View All Projects
+              </button>
+              <button
+                onClick={() => {
+                  navigate("/project");
+                  setTimeout(() => {}, 100);
+                }}
+                className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 text-left font-medium transition"
+              >
+                ➕ Create New Project
+              </button>
+              <button
+                onClick={() => navigate("/project")}
+                className="w-full px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-left font-medium transition"
+              >
+                🔗 Join Project via Invite
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Placeholder for future sections */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-lg font-semibold mb-2">Recent Activity</h2>
-          <p className="text-gray-500 text-sm">No recent activity yet</p>
+          <div className="bg-white p-6 rounded-xl shadow">
+            <h2 className="text-lg font-semibold mb-4">Recent Projects</h2>
+            {projects?.length === 0 ? (
+              <p className="text-gray-500 text-sm">
+                No projects yet. Create your first project.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {projects?.slice(0, 5).map((p) => (
+                  <button
+                    key={p._id}
+                    onClick={() => navigate(`/project/${p._id}`)}
+                    className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition text-left w-full"
+                  >
+                    <div>
+                      <p className="font-medium text-gray-800">{p.title}</p>
+                      <p className="text-xs text-gray-500">
+                        {p.members?.length || 0} members
+                      </p>
+                    </div>
+                    <span className="text-gray-400">→</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

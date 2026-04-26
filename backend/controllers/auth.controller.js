@@ -3,48 +3,51 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const User = require("../models/User");
 const { compareSync, hashSync } = require("bcrypt");
+const auditLog = require("../utils/auditLogger");
 
 const transporter = nodemailer.createTransport({
   service: "Gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
 });
 
 const register = async (req, res) => {
   try {
-    const email = req.body.email.toLowerCase();
-    const { title, password } = req.body;
-    let role;
-    if (req.body.role) {
-      role = req.body.role;
-    }
+    const email = req.body.email?.toLowerCase();
+    const { name, password } = req.body;
 
-    const findUser = await User.findOne({ email });
-    if (findUser)
+    if (!name || !email || !password)
       return res
         .status(400)
-        .json({ success: false, message: "user already exists." });
+        .json({
+          success: false,
+          message: "Name, email and password are required",
+        });
 
-    if (role === "admin") {
-      role = "admin";
-    } else {
-      role = "user";
-    }
+    const existing = await User.findOne({ email });
+    if (existing)
+      return res
+        .status(400)
+        .json({ success: false, message: "User already exists" });
 
     const hashedPassword = hashSync(password, 10);
-    const user = await User.create({
-      title,
-      email,
-      password: hashedPassword,
-      role: role,
+    const user = await User.create({ name, email, password: hashedPassword });
+
+    await auditLog(user._id, "user.signup", "User", user._id, { email });
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
     });
 
     return res.status(201).json({
       success: true,
-      message: "user created successfully",
-      data: user,
+      message: "User created successfully",
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
     });
   } catch (error) {
     res
@@ -56,26 +59,38 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
+    if (!email || !password)
+      return res
+        .status(400)
+        .json({ success: false, message: "Email and password required" });
+
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user)
       return res
         .status(404)
         .json({ success: false, message: "Invalid credentials" });
 
     const match = compareSync(password, user.password);
-
     if (!match)
       return res
         .status(401)
-        .json({ success: false, message: "Incorrect password" });
+        .json({ success: false, message: "Invalid credentials" });
 
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "7d",
     });
 
-    return res
-      .status(200)
-      .json({ success: true, message: "login successfull", token, user });
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
   } catch (error) {
     res
       .status(500)
@@ -85,135 +100,75 @@ const login = async (req, res) => {
 
 const getUser = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const user = await User.findById(userId).select("-password");
-
+    const user = await User.findById(req.user._id).select("-password");
     if (!user)
       return res
-        .status(400)
-        .json({ success: false, message: "user not found" });
-
-    res
-      .status(200)
-      .json({ success: true, message: "user fetched successfully", user });
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    res.status(200).json({ success: true, user });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-const forgotPasswordControllers = async (req, res) => {
+const forgotPassword = async (req, res) => {
   const { email } = req.body;
   try {
-    if (!email) return res.status(400).json({ msg: "Email required" });
-
-    const user = await User.findOne({ email });
+    if (!email)
+      return res
+        .status(400)
+        .json({ success: false, message: "Email required" });
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user)
-      return res.status(400).json({ msg: "User not found with that email" });
+      return res
+        .status(400)
+        .json({ success: false, message: "No user with that email" });
 
     const resetToken = crypto.randomBytes(32).toString("hex");
-    const resetTokenHash = crypto
+    user.resetPasswordToken = crypto
       .createHash("sha256")
       .update(resetToken)
       .digest("hex");
-
-    user.resetPasswordToken = resetTokenHash;
     user.resetPasswordExpire = Date.now() + 3600000;
-
     await user.save();
 
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-
-    const mailOptions = {
-      from: `"ES-Magico Team" <${process.env.EMAIL_USER}>`,
+    await transporter.sendMail({
+      from: `"EsMagico" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: "Reset Your Password - HabitLeaf",
-      html: `
-  <div style="font-family: Arial, sans-serif; background-color:#f9fafb; padding:30px;">
-  <div style="max-width:600px; margin:auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-  
-  <div style="background:linear-gradient(90deg,#16a34a,#22c55e); padding:20px; text-align:center;">
-        <h1 style="color:#ffffff; margin:0; font-size:22px; font-weight:600;">🌱 HabitLeaf</h1>
-      </div>
-
-      <div style="padding:30px; color:#374151;">
-        <h2 style="margin-top:0; font-size:20px; color:#111827;">Password Reset Request</h2>
-        <p style="font-size:15px; line-height:1.6;">Hello <b>${user.title}</b>,</p>
-        <p style="font-size:15px; line-height:1.6;">
-        We received a request to reset your HabitLeaf account password.  
-        If this was you, click the button below to set a new password:
-        </p>
-        
-        <div style="text-align:center; margin:30px 0;">
-        <a href="${resetUrl}" 
-        style="background-color:#16a34a; color:#ffffff; padding:12px 28px; border-radius:6px; text-decoration:none; font-weight:600; font-size:15px; display:inline-block;">
-        Reset Password
-        </a>
-        </div>
-        
-        <p style="font-size:14px; line-height:1.6; color:#6b7280;">
-        ⚠️ This link will expire in <b>1 hour</b>.  
-        If you didn’t request this, please ignore this email.
-        </p>
-        
-        <p style="font-size:14px; margin-top:25px;">Best regards, <br/>🌿 The HabitLeaf Team</p>
-      </div>
-      
-      <div style="background:#f3f4f6; padding:15px; text-align:center; font-size:12px; color:#6b7280;">
-      © ${new Date().getFullYear()} HabitLeaf, Inc. All rights reserved.  
-        <br/>
-        Need help? <a href="mailto:support@habitleaf.com" style="color:#16a34a; text-decoration:none;">Contact Support</a>
-        </div>
-        </div>
-        </div>
-        `,
-    };
-
-    transporter.sendMail(mailOptions, (err) => {
-      if (err) {
-        console.error("Error sending email:", err);
-        return res.status(500).json({ msg: "Failed to send email" });
-      }
-      res.json({ msg: "Reset link sent to your email" });
+      subject: "Reset Your Password - EsMagico",
+      html: `<p>Hello <b>${user.name}</b>,</p><p>Click <a href="${resetUrl}">here</a> to reset your password. Link expires in 1 hour.</p>`,
     });
+    res.json({ success: true, message: "Reset link sent" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Server error" });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-const resetPasswordControllers = async (req, res) => {
+const resetPassword = async (req, res) => {
   try {
-    const resetPassToken = crypto
+    const tokenHash = crypto
       .createHash("sha256")
       .update(req.params.token)
       .digest("hex");
-
     const user = await User.findOne({
-      resetPasswordToken: resetPassToken,
+      resetPasswordToken: tokenHash,
       resetPasswordExpire: { $gt: Date.now() },
     });
+    if (!user)
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid or expired token" });
 
-    if (!user) return res.status(400).json({ msg: "Invalid or expired token" });
-
-    const hashedPassword = await bcrypt.hash(req.body.password, 8);
-    user.password = hashedPassword;
-
+    user.password = hashSync(req.body.password, 10);
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
-
     await user.save();
 
-    res.json({ msg: "Password reset successful" });
+    res.json({ success: true, message: "Password reset successful" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ msg: "Server error" });
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-module.exports = {
-  register,
-  login,
-  getUser,
-  forgotPasswordControllers,
-  resetPasswordControllers,
-};
+module.exports = { register, login, getUser, forgotPassword, resetPassword };

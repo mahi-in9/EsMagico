@@ -1,47 +1,64 @@
-import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useDispatch, useSelector } from "react-redux";
+import { logout } from "../app/slice/authSlice";
 
 const Navbar = () => {
-  const navItems = [
-    { label: "Home", path: "/" },
-    { label: "Projects", path: "/project" }
-  ];
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { user } = useSelector((s) => s.auth);
+
+  const handleLogout = () => {
+    dispatch(logout());
+    navigate("/login");
+  };
 
   return (
     <nav className="w-full bg-gray-900 text-white shadow-md">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-        {/* Logo / Brand */}
-        <div className="text-xl font-semibold tracking-wide">
-          Orchestration System
-        </div>
+        <Link to="/" className="text-xl font-bold tracking-wide text-blue-400">
+          ⚙ EsMagico
+        </Link>
 
-        {/* Navigation Links */}
-        <div className="hidden md:flex items-center gap-6 text-sm font-medium">
-          {navItems.map((n) => (
-            <Link
-              to={n.path}
-              className="hover:text-gray-300 transition cursor-pointer p-2"
-              key={n.label}
-            >
-              {n.label}
+        {user && (
+          <div className="hidden md:flex items-center gap-6 text-sm font-medium">
+            <Link to="/" className="hover:text-gray-300 transition">
+              Dashboard
             </Link>
-          ))}
-        </div>
+            <Link to="/project" className="hover:text-gray-300 transition">
+              Projects
+            </Link>
+          </div>
+        )}
 
-        {/* Right Section */}
-        <div className="flex items-center gap-3">
-          <Link
-            to={"/login"}
-            className="px-4 py-1.5 bg-blue-600 rounded-md hover:bg-blue-700 transition text-sm"
-          >
-            Login
-          </Link>
-          <Link
-            to={"signup"}
-            className="px-4 py-1.5 border border-gray-400 rounded-md hover:bg-gray-800 transition text-sm"
-          >
-            Signup
-          </Link>
+        <div className="flex items-center gap-3 text-sm">
+          {user ? (
+            <>
+              <span className="text-gray-400 hidden sm:block">
+                👤 {user.name}
+              </span>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-1.5 bg-red-600 rounded-md hover:bg-red-700 transition"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/login"
+                className="px-4 py-1.5 bg-blue-600 rounded-md hover:bg-blue-700 transition"
+              >
+                Login
+              </Link>
+              <Link
+                to="/signup"
+                className="px-4 py-1.5 border border-gray-400 rounded-md hover:bg-gray-800 transition"
+              >
+                Signup
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </nav>
