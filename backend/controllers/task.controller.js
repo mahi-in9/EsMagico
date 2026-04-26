@@ -3,8 +3,8 @@ const Project = require("../models/Project");
 const auditLog = require("../utils/auditLogger");
 const { hasCycle } = require("../utils/cycleDetection");
 const { triggerWebhook } = require("../utils/webhookTrigger");
+const ExecutionService = require("../services/ExecutionService");
 
-// Helper: verify user is a project member
 const assertMember = async (projectId, userId) => {
   const project = await Project.findById(projectId);
   if (!project)
@@ -29,7 +29,6 @@ const createTask = async (req, res, next) => {
       maxRetries,
       dependencies,
     } = req.body;
-
     if (!title || !description)
       return res
         .status(400)
@@ -40,26 +39,34 @@ const createTask = async (req, res, next) => {
 
     await assertMember(projectId, req.user._id);
 
-    // Cycle detection
     if (dependencies && dependencies.length > 0) {
       const projectTasks = await Task.find({ projectId }, "_id dependencies");
-      const fakePending = {
-        _id: { toString: () => "new_pending" },
-        dependencies: dependencies,
-      };
-      if (hasCycle("new_pending", dependencies, [...projectTasks, fakePending]))
+      // Temporarily add new task with these deps for cycle check
+      const fakeId = "new__" + Date.now();
+      const allForCheck = [
+        ...projectTasks.map((t) => ({
+          _id: t._id,
+          dependencies: t.dependencies,
+        })),
+        { _id: { toString: () => fakeId }, dependencies },
+      ];
+      if (hasCycle(fakeId, dependencies, allForCheck))
         return res
           .status(400)
-          .json({ success: false, message: "Cyclic dependency detected" });
+          .json({
+            success: false,
+            message:
+              "Cyclic dependency detected. This would create a dependency loop.",
+          });
     }
 
     const task = await Task.create({
       title,
       description,
-      priority: priority || 3,
-      estimatedHours: estimatedHours || 1,
+      priority: Number(priority) || 3,
+      estimatedHours: Number(estimatedHours) || 1,
       resourceTag: resourceTag || "",
-      maxRetries: maxRetries !== undefined ? maxRetries : 3,
+      maxRetries: maxRetries !== undefined ? Number(maxRetries) : 3,
       dependencies: dependencies || [],
       projectId,
       user: req.user._id,
@@ -71,13 +78,16 @@ const createTask = async (req, res, next) => {
       projectId,
     });
 
-    // Emit via socket if available
+    const populated = await Task.findById(task._id).populate(
+      "dependencies",
+      "title status priority",
+    );
     const io = req.app.get("io");
-    if (io) io.to(projectId).emit("task:created", task);
+    if (io) io.to(projectId).emit("task:created", populated);
 
     res
       .status(201)
-      .json({ success: true, message: "Task created", data: task });
+      .json({ success: true, message: "Task created", data: populated });
   } catch (error) {
     next(error);
   }
@@ -101,7 +111,7 @@ const getTaskById = async (req, res, next) => {
   try {
     const task = await Task.findById(req.params.taskId).populate(
       "dependencies",
-      "title status",
+      "title status priority",
     );
     if (!task)
       return res
@@ -127,7 +137,7 @@ const getTaskHistory = async (req, res, next) => {
       .status(200)
       .json({
         success: true,
-        data: task.versionHistory.sort(
+        data: [...task.versionHistory].sort(
           (a, b) => b.versionNumber - a.versionNumber,
         ),
       });
@@ -157,7 +167,6 @@ const updateTask = async (req, res, next) => {
         .json({ success: false, message: "Task not found" });
     await assertMember(task.projectId, req.user._id);
 
-    // Optimistic concurrency check
     if (
       versionNumber !== undefined &&
       task.versionNumber !== Number(versionNumber)
@@ -165,12 +174,11 @@ const updateTask = async (req, res, next) => {
       return res.status(409).json({
         success: false,
         message:
-          "Update conflict: task was modified by someone else. Refresh and try again.",
+          "Update conflict: this task was modified by someone else. Refresh and try again.",
         latestData: task,
       });
 
-    // Cycle detection on dependency change
-    if (dependencies !== undefined) {
+    if (dependencies !== undefined && dependencies.length > 0) {
       const projectTasks = await Task.find(
         { projectId: task.projectId },
         "_id dependencies",
@@ -179,17 +187,16 @@ const updateTask = async (req, res, next) => {
         (t) => t._id.toString() !== task._id.toString(),
       );
       if (
-        hasCycle(task._id, dependencies, [
+        hasCycle(task._id.toString(), dependencies, [
           ...others,
           { _id: task._id, dependencies },
         ])
       )
         return res
           .status(400)
-          .json({ success: false, message: "Cyclic dependency detected" });
+          .json({ success: false, message: "Cyclic dependency detected." });
     }
 
-    // Save version snapshot before update
     task.versionHistory.push({
       versionNumber: task.versionNumber,
       title: task.title,
@@ -206,24 +213,28 @@ const updateTask = async (req, res, next) => {
 
     if (title !== undefined) task.title = title;
     if (description !== undefined) task.description = description;
-    if (priority !== undefined) task.priority = priority;
-    if (estimatedHours !== undefined) task.estimatedHours = estimatedHours;
+    if (priority !== undefined) task.priority = Number(priority);
+    if (estimatedHours !== undefined)
+      task.estimatedHours = Number(estimatedHours);
     if (resourceTag !== undefined) task.resourceTag = resourceTag;
-    if (maxRetries !== undefined) task.maxRetries = maxRetries;
+    if (maxRetries !== undefined) task.maxRetries = Number(maxRetries);
     if (dependencies !== undefined) task.dependencies = dependencies;
     task.versionNumber += 1;
-
     await task.save();
+
     await auditLog(req.user._id, "task.updated", "Task", task._id, {
       fields: Object.keys(req.body),
     });
-
+    const populated = await Task.findById(task._id).populate(
+      "dependencies",
+      "title status priority",
+    );
     const io = req.app.get("io");
-    if (io) io.to(task.projectId.toString()).emit("task:updated", task);
+    if (io) io.to(task.projectId.toString()).emit("task:updated", populated);
 
     res
       .status(200)
-      .json({ success: true, message: "Task updated", data: task });
+      .json({ success: true, message: "Task updated", data: populated });
   } catch (error) {
     next(error);
   }
@@ -245,7 +256,10 @@ const updateTaskStatus = async (req, res, next) => {
         .status(400)
         .json({ success: false, message: "Invalid status" });
 
-    const task = await Task.findById(taskId).populate("dependencies", "status");
+    const task = await Task.findById(taskId).populate(
+      "dependencies",
+      "status title",
+    );
     if (!task)
       return res
         .status(404)
@@ -253,14 +267,14 @@ const updateTaskStatus = async (req, res, next) => {
     await assertMember(task.projectId, req.user._id);
 
     if (status === "Running") {
-      const depsDone = task.dependencies.every((d) => d.status === "Completed");
-      if (!depsDone)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Cannot run: not all dependencies are Completed",
-          });
+      const unfinished = task.dependencies.filter(
+        (d) => d.status !== "Completed",
+      );
+      if (unfinished.length > 0)
+        return res.status(400).json({
+          success: false,
+          message: `Cannot run: dependency "${unfinished[0].title}" is not Completed (currently ${unfinished[0].status})`,
+        });
 
       if (task.resourceTag) {
         const conflict = await Task.findOne({
@@ -274,15 +288,10 @@ const updateTaskStatus = async (req, res, next) => {
             .status(400)
             .json({
               success: false,
-              message: `Resource conflict: "${conflict.title}" already Running with tag "${task.resourceTag}"`,
+              message: `Resource conflict: "${conflict.title}" is already Running with tag "${task.resourceTag}"`,
             });
       }
     }
-
-    if (status === "Failed")
-      await auditLog(req.user._id, "task.failed", "Task", task._id, {
-        previousStatus: task.status,
-      });
 
     task.versionHistory.push({
       versionNumber: task.versionNumber,
@@ -302,24 +311,30 @@ const updateTaskStatus = async (req, res, next) => {
     task.versionNumber += 1;
     await task.save();
 
+    if (status === "Failed")
+      await auditLog(req.user._id, "task.failed", "Task", task._id, {
+        previousStatus: task.status,
+      });
     await auditLog(req.user._id, "task.status_changed", "Task", task._id, {
       status,
     });
-
-    // Fire webhook on completion
     if (status === "Completed") triggerWebhook(task.projectId, task);
 
+    const populated = await Task.findById(task._id).populate(
+      "dependencies",
+      "title status priority",
+    );
     const io = req.app.get("io");
     if (io)
       io.to(task.projectId.toString()).emit("task:statusChanged", {
         taskId: task._id,
         status,
-        task,
+        task: populated,
       });
 
     res
       .status(200)
-      .json({ success: true, message: "Status updated", data: task });
+      .json({ success: true, message: "Status updated", data: populated });
   } catch (error) {
     next(error);
   }
@@ -334,7 +349,6 @@ const retryTask = async (req, res, next) => {
         .status(404)
         .json({ success: false, message: "Task not found" });
     await assertMember(task.projectId, req.user._id);
-
     if (task.status !== "Failed")
       return res
         .status(400)
@@ -351,7 +365,6 @@ const retryTask = async (req, res, next) => {
     task.status = "Pending";
     task.versionNumber += 1;
     await task.save();
-
     await auditLog(req.user._id, "task.retried", "Task", task._id, {
       retryCount: task.retryCount,
     });
@@ -361,6 +374,7 @@ const retryTask = async (req, res, next) => {
       io.to(task.projectId.toString()).emit("task:retried", {
         taskId: task._id,
         retryCount: task.retryCount,
+        task,
       });
 
     res
@@ -384,7 +398,6 @@ const deleteTask = async (req, res, next) => {
         .status(404)
         .json({ success: false, message: "Task not found" });
     await assertMember(task.projectId, req.user._id);
-
     await Task.findByIdAndDelete(taskId);
     await Project.findByIdAndUpdate(task.projectId, {
       $pull: { tasks: task._id },
@@ -405,77 +418,32 @@ const deleteTask = async (req, res, next) => {
   }
 };
 
-// POST /api/project/:id/compute-execution
+// POST /api/project/:id/compute-execution  — uses ExecutionService
 const computeExecution = async (req, res, next) => {
   try {
     const projectId = req.params.id;
     await assertMember(projectId, req.user._id);
-
     const allTasks = await Task.find({ projectId });
-    const taskMap = {};
-    allTasks.forEach((t) => (taskMap[t._id.toString()] = t));
-
-    // Exclude Blocked tasks
     const eligible = allTasks.filter((t) => t.status !== "Blocked");
-
-    // Topological sort (Kahn's algorithm)
-    const inDegree = {};
-    const adj = {};
-    eligible.forEach((t) => {
-      inDegree[t._id.toString()] = 0;
-      adj[t._id.toString()] = [];
-    });
-
-    eligible.forEach((t) => {
-      (t.dependencies || []).forEach((depId) => {
-        const dep = depId.toString();
-        if (inDegree[dep] !== undefined) {
-          inDegree[t._id.toString()]++;
-          adj[dep].push(t._id.toString());
-        }
-      });
-    });
-
-    // Sort candidates by priority desc, estimatedHours asc, createdAt asc
-    const compareTasks = (a, b) => {
-      if (b.priority !== a.priority) return b.priority - a.priority;
-      if (a.estimatedHours !== b.estimatedHours)
-        return a.estimatedHours - b.estimatedHours;
-      return new Date(a.createdAt) - new Date(b.createdAt);
-    };
-
-    let queue = eligible
-      .filter((t) => inDegree[t._id.toString()] === 0)
-      .sort(compareTasks);
-    const executionOrder = [];
-
-    while (queue.length) {
-      const task = queue.shift();
-      executionOrder.push(task);
-      const neighbors = (adj[task._id.toString()] || [])
-        .map((id) => taskMap[id])
-        .filter(Boolean);
-      for (const neighbor of neighbors) {
-        inDegree[neighbor._id.toString()]--;
-        if (inDegree[neighbor._id.toString()] === 0) queue.push(neighbor);
-      }
-      queue.sort(compareTasks);
-    }
-
-    const blockedTasks = allTasks.filter((t) => t.status === "Blocked");
+    const plan = ExecutionService.computeExecutionPlan(eligible);
+    const blocked = allTasks.filter((t) => t.status === "Blocked");
 
     res.status(200).json({
       success: true,
       data: {
-        executionOrder: executionOrder.map((t, i) => ({
-          step: i + 1,
-          _id: t._id,
-          title: t.title,
-          priority: t.priority,
-          estimatedHours: t.estimatedHours,
-          status: t.status,
+        steps: plan.map((step) => ({
+          step: step.step,
+          parallel: step.parallel,
+          tasks: step.tasks.map((t) => ({
+            _id: t._id,
+            title: t.title,
+            priority: t.priority,
+            estimatedHours: t.estimatedHours,
+            status: t.status,
+            resourceTag: t.resourceTag,
+          })),
         })),
-        blockedTasks: blockedTasks.map((t) => ({
+        blockedTasks: blocked.map((t) => ({
           _id: t._id,
           title: t.title,
           status: t.status,
@@ -489,109 +457,23 @@ const computeExecution = async (req, res, next) => {
   }
 };
 
-// POST /api/project/:id/simulate
+// POST /api/project/:id/simulate  — uses ExecutionService
 const simulate = async (req, res, next) => {
   try {
     const projectId = req.params.id;
     const { availableHours, failedTaskIds = [] } = req.body;
-
     if (!availableHours || availableHours <= 0)
       return res
         .status(400)
-        .json({
-          success: false,
-          message: "availableHours required and must be > 0",
-        });
+        .json({ success: false, message: "availableHours must be > 0" });
 
     await assertMember(projectId, req.user._id);
     const allTasks = await Task.find({ projectId });
-    const taskMap = {};
-    allTasks.forEach((t) => (taskMap[t._id.toString()] = t));
-
-    const failedSet = new Set(failedTaskIds.map((id) => id.toString()));
-
-    // Tasks blocked due to Failed dependency
-    const isBlockedByFailed = (task, visited = new Set()) => {
-      if (visited.has(task._id.toString())) return false;
-      visited.add(task._id.toString());
-      for (const depId of task.dependencies || []) {
-        const dep = taskMap[depId.toString()];
-        if (!dep) continue;
-        if (failedSet.has(dep._id.toString()) || dep.status === "Failed")
-          return true;
-        if (isBlockedByFailed(dep, visited)) return true;
-      }
-      return false;
-    };
-
-    const blockedTasks = [];
-    const candidateTasks = [];
-
-    for (const task of allTasks) {
-      if (task.status === "Blocked" || task.status === "Completed") continue;
-      if (failedSet.has(task._id.toString()) || task.status === "Failed") {
-        blockedTasks.push(task);
-        continue;
-      }
-      if (isBlockedByFailed(task)) {
-        blockedTasks.push(task);
-        continue;
-      }
-      candidateTasks.push(task);
-    }
-
-    // Topological sort on candidates
-    const inDegree = {};
-    const adj = {};
-    candidateTasks.forEach((t) => {
-      inDegree[t._id.toString()] = 0;
-      adj[t._id.toString()] = [];
-    });
-    candidateTasks.forEach((t) => {
-      (t.dependencies || []).forEach((depId) => {
-        const dep = depId.toString();
-        if (inDegree[dep] !== undefined) {
-          inDegree[t._id.toString()]++;
-          adj[dep].push(t._id.toString());
-        }
-      });
-    });
-
-    const compareFn = (a, b) => {
-      if (b.priority !== a.priority) return b.priority - a.priority;
-      if (a.estimatedHours !== b.estimatedHours)
-        return a.estimatedHours - b.estimatedHours;
-      return new Date(a.createdAt) - new Date(b.createdAt);
-    };
-
-    let queue = candidateTasks
-      .filter((t) => inDegree[t._id.toString()] === 0)
-      .sort(compareFn);
-    const executionOrder = [];
-    const selectedTasks = [];
-    const skippedTasks = [];
-    let hoursUsed = 0;
-    let totalPriorityScore = 0;
-
-    while (queue.length) {
-      const task = queue.shift();
-      if (hoursUsed + task.estimatedHours <= availableHours) {
-        executionOrder.push(task);
-        selectedTasks.push(task);
-        hoursUsed += task.estimatedHours;
-        totalPriorityScore += task.priority;
-        const neighbors = (adj[task._id.toString()] || [])
-          .map((id) => taskMap[id])
-          .filter(Boolean);
-        for (const n of neighbors) {
-          inDegree[n._id.toString()]--;
-          if (inDegree[n._id.toString()] === 0) queue.push(n);
-        }
-        queue.sort(compareFn);
-      } else {
-        skippedTasks.push(task);
-      }
-    }
+    const result = ExecutionService.simulate(
+      allTasks,
+      Number(availableHours),
+      failedTaskIds,
+    );
 
     const fmt = (t) => ({
       _id: t._id,
@@ -604,16 +486,18 @@ const simulate = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {
-        availableHours,
-        hoursUsed: Math.round(hoursUsed * 100) / 100,
-        executionOrder: executionOrder.map((t, i) => ({
-          step: i + 1,
-          ...fmt(t),
+        availableHours: Number(availableHours),
+        hoursUsed: Math.round(result.hoursUsed * 100) / 100,
+        log: result.log,
+        steps: result.plan.map((step) => ({
+          step: step.step,
+          parallel: step.parallel,
+          tasks: step.tasks.map(fmt),
         })),
-        selectedTasks: selectedTasks.map(fmt),
-        blockedTasks: blockedTasks.map(fmt),
-        skippedTasks: skippedTasks.map(fmt),
-        totalPriorityScore,
+        selectedTasks: result.selected.map(fmt),
+        blockedTasks: result.blocked.map(fmt),
+        skippedTasks: result.skipped.map(fmt),
+        totalPriorityScore: result.totalPriorityScore,
       },
     });
   } catch (error) {

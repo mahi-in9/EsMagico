@@ -1,9 +1,9 @@
 /**
  * 🔧 EXECUTION ENGINE - THE HEART OF THE SYSTEM
- * 
+ *
  * This is where the magic happens.
  * All logic for DAG, sorting, planning, simulation lives here.
- * 
+ *
  * RULES:
  * 1. No database calls - pure functions only
  * 2. No side effects
@@ -11,150 +11,169 @@
  * 4. Beginner friendly comments
  */
 
+/**
+ * ✅ Kahn's Algorithm for Topological Sort
+ *
+ * This is THE standard algorithm for DAG execution order.
+ * Every workflow engine on the planet uses this.
+ *
+ * Sort order WITHIN same step:
+ *  1. Highest PRIORITY first
+ *  2. Lowest ESTIMATED HOURS first (shortest job first)
+ */
 class ExecutionService {
-
-  /**
-   * ✅ Kahn's Algorithm for Topological Sort
-   * 
-   * This is THE standard algorithm for DAG execution order.
-   * Every workflow engine on the planet uses this.
-   * 
-   * Sort order WITHIN same step:
-   *  1. Highest PRIORITY first
-   *  2. Lowest ESTIMATED HOURS first (shortest job first)
-   */
+  // Kahn's Algorithm — returns parallel STEPS (tasks that can run concurrently)
   static computeExecutionPlan(tasks) {
+    const taskMap = new Map(tasks.map((t) => [t._id.toString(), t]));
     const inDegree = new Map();
     const adjacency = new Map();
 
-    // Initialize graph
     for (const task of tasks) {
-      inDegree.set(task._id.toString(), task.dependencies.length);
+      inDegree.set(task._id.toString(), 0);
       adjacency.set(task._id.toString(), []);
     }
 
-    // Build reverse graph: who depends on whom?
     for (const task of tasks) {
-      for (const depId of task.dependencies) {
-        const depStr = depId.toString();
-        if (adjacency.has(depStr)) {
-          adjacency.get(depStr).push(task._id.toString());
+      for (const depId of task.dependencies || []) {
+        const dep = depId.toString();
+        if (adjacency.has(dep)) {
+          adjacency.get(dep).push(task._id.toString());
+          inDegree.set(
+            task._id.toString(),
+            (inDegree.get(task._id.toString()) || 0) + 1,
+          );
         }
       }
     }
 
     const plan = [];
-    let queue = [];
+    let queue = [...inDegree.entries()]
+      .filter(([, d]) => d === 0)
+      .map(([id]) => id);
 
-    // Step 1: Find all tasks with NO dependencies
-    for (const [taskId, degree] of inDegree) {
-      if (degree === 0) {
-        queue.push(taskId);
-      }
-    }
-
-    while (queue.length > 0) {
-
-      // 🔑 IMPORTANT: SORT BEFORE RUNNING!
-      queue.sort((a, b) => {
-        const ta = tasks.find(t => t._id.toString() === a);
-        const tb = tasks.find(t => t._id.toString() === b);
-        
-        // First priority (descending)
-        if (tb.priority !== ta.priority) return tb.priority - ta.priority;
-        
-        // Then shortest job first (ascending)
+    const sortFn = (a, b) => {
+      const ta = taskMap.get(a),
+        tb = taskMap.get(b);
+      if (tb.priority !== ta.priority) return tb.priority - ta.priority;
+      if (ta.estimatedHours !== tb.estimatedHours)
         return ta.estimatedHours - tb.estimatedHours;
+      return new Date(ta.createdAt) - new Date(tb.createdAt);
+    };
+
+    let stepNum = 1;
+    while (queue.length > 0) {
+      queue.sort(sortFn);
+      const levelTasks = queue.map((id) => taskMap.get(id));
+      plan.push({
+        step: stepNum++,
+        parallel: levelTasks.length > 1,
+        tasks: levelTasks,
       });
 
-      const levelSize = queue.length;
-      const stepTasks = [];
-
-      for (let i = 0; i < levelSize; i++) {
-        const taskId = queue.shift();
-        const task = tasks.find(t => t._id.toString() === taskId);
-        stepTasks.push(task);
-
-        // Unlock all tasks that depend on this one
-        for (const neighbor of adjacency.get(taskId)) {
+      const nextQueue = [];
+      for (const taskId of queue) {
+        for (const neighbor of adjacency.get(taskId) || []) {
           inDegree.set(neighbor, inDegree.get(neighbor) - 1);
-          if (inDegree.get(neighbor) === 0) {
-            queue.push(neighbor);
-          }
+          if (inDegree.get(neighbor) === 0) nextQueue.push(neighbor);
         }
       }
-
-      plan.push({
-        step: plan.length + 1,
-        parallel: true,
-        tasks: stepTasks
-      });
+      queue = nextQueue;
     }
 
     return plan;
   }
 
-  /**
-   * ⏱️ SIMULATION ENGINE
-   * 
-   * Given X available hours, tells you EXACTLY:
-   * ✅ What will get completed
-   * ❌ What is blocked
-   * ⏭ What there is no time for
-   */
-  static simulate(tasks, availableHours) {
-    const plan = this.computeExecutionPlan(tasks);
+  // Simulation: given hours budget, returns what runs, what's blocked, what's skipped
+  static simulate(tasks, availableHours, extraFailedIds = []) {
+    const failedSet = new Set(extraFailedIds.map((id) => id.toString()));
+    const taskMap = new Map(tasks.map((t) => [t._id.toString(), t]));
     const log = [];
-    let hoursUsed = 0;
-    
-    const selected = [];
-    const blocked = [];
-    const skipped = [];
 
-    log.push(`[ENGINE] Starting simulation`);
-    log.push(`[CONFIG] Available hours: ${availableHours}`);
-    log.push(`================================`);
+    const isBlockedByFailed = (task, visited = new Set()) => {
+      if (visited.has(task._id.toString())) return false;
+      visited.add(task._id.toString());
+      for (const depId of task.dependencies || []) {
+        const dep = taskMap.get(depId.toString());
+        if (!dep) continue;
+        if (failedSet.has(dep._id.toString()) || dep.status === "Failed")
+          return true;
+        if (isBlockedByFailed(dep, visited)) return true;
+      }
+      return false;
+    };
+
+    const eligible = tasks.filter((t) => {
+      if (t.status === "Completed") return false;
+      if (
+        t.status === "Blocked" ||
+        t.status === "Failed" ||
+        failedSet.has(t._id.toString())
+      )
+        return false;
+      if (isBlockedByFailed(t)) return false;
+      return true;
+    });
+
+    const blocked = tasks.filter(
+      (t) =>
+        t.status === "Blocked" ||
+        t.status === "Failed" ||
+        failedSet.has(t._id.toString()) ||
+        isBlockedByFailed(t),
+    );
+
+    const plan = this.computeExecutionPlan(eligible);
+    const selected = [],
+      skipped = [];
+    let hoursUsed = 0;
+
+    log.push(`[ENGINE] EsMagico Orchestrator v2.0`);
+    log.push(`[CONFIG] Available hours: ${availableHours}h`);
+    log.push(
+      `[CONFIG] Total tasks: ${tasks.length} | Eligible: ${eligible.length} | Blocked: ${blocked.length}`,
+    );
+    log.push(`─────────────────────────────────────`);
 
     for (const step of plan) {
       log.push(``);
-      log.push(`[STEP ${step.step}]`);
+      log.push(
+        `[STEP ${step.step}] ${step.parallel ? `⚡ PARALLEL (${step.tasks.length} tasks)` : "▶ SEQUENTIAL"}`,
+      );
 
       for (const task of step.tasks) {
-
-        if (task.status === 'Completed') {
-          log.push(`   ✅ ${task.title} (already done)`);
+        const fits = hoursUsed + task.estimatedHours <= availableHours;
+        if (fits) {
+          log.push(
+            `   ✅ ${task.title.padEnd(28)} P${task.priority}  ${task.estimatedHours}h  [SCHEDULED]`,
+          );
+          hoursUsed += task.estimatedHours;
           selected.push(task);
-          continue;
-        }
-
-        if (task.status === 'Failed' || task.status === 'Blocked') {
-          log.push(`   ❌ ${task.title} (${task.status})`);
-          blocked.push(task);
-          continue;
-        }
-
-        // Check if we have enough time left
-        if (hoursUsed + task.estimatedHours > availableHours) {
-          log.push(`   ⏭ ${task.title} (no time)`);
+        } else {
+          log.push(
+            `   ⏭  ${task.title.padEnd(28)} P${task.priority}  ${task.estimatedHours}h  [NO TIME]`,
+          );
           skipped.push(task);
-          continue;
         }
-
-        // ✅ We have time - run it!
-        log.push(`   ▶️ ${task.title} (${task.estimatedHours}h, P${task.priority})`);
-        hoursUsed += task.estimatedHours;
-        selected.push(task);
       }
     }
 
-    log.push(``);
-    log.push(`[RESULT] Simulation complete`);
-    log.push(`   Completed: ${selected.length}`);
-    log.push(`   Blocked: ${blocked.length}`);
-    log.push(`   Skipped: ${skipped.length}`);
-    log.push(`   Hours used: ${hoursUsed} / ${availableHours}`);
+    for (const task of blocked) {
+      log.push(
+        `   ❌ ${task.title.padEnd(28)}                [${task.status.toUpperCase()}]`,
+      );
+    }
 
-    const totalPriority = selected.reduce((sum, t) => sum + t.priority, 0);
+    const totalPriorityScore = selected.reduce((s, t) => s + t.priority, 0);
+    log.push(``);
+    log.push(`─────────────────────────────────────`);
+    log.push(
+      `[RESULT] Hours used: ${hoursUsed.toFixed(1)}h / ${availableHours}h`,
+    );
+    log.push(
+      `[RESULT] Scheduled: ${selected.length} | Blocked: ${blocked.length} | Skipped: ${skipped.length}`,
+    );
+    log.push(`[RESULT] Priority score: ${totalPriorityScore}`);
+    log.push(`[ENGINE] Simulation complete ✓`);
 
     return {
       log,
@@ -163,7 +182,7 @@ class ExecutionService {
       blocked,
       skipped,
       hoursUsed,
-      totalPriorityScore: totalPriority
+      totalPriorityScore,
     };
   }
 }

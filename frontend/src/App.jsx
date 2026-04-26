@@ -11,29 +11,23 @@ import Project from "./pages/Project";
 import ProjectDetails from "./pages/ProjectDetails";
 import AuditLogs from "./pages/AuditLogs";
 
-// Protected route wrapper
+const Loader = () => (
+  <div className="h-screen flex items-center justify-center">
+    <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+);
+
 const PrivateRoute = ({ children }) => {
   const { user, isAuthChecked } = useSelector((s) => s.auth);
   const location = useLocation();
-  if (!isAuthChecked)
-    return (
-      <div className="h-screen flex items-center justify-center text-gray-500">
-        Loading...
-      </div>
-    );
+  if (!isAuthChecked) return <Loader />;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   return children;
 };
 
-// Public route — redirect to home if already logged in
 const PublicRoute = ({ children }) => {
   const { user, isAuthChecked } = useSelector((s) => s.auth);
-  if (!isAuthChecked)
-    return (
-      <div className="h-screen flex items-center justify-center text-gray-500">
-        Loading...
-      </div>
-    );
+  if (!isAuthChecked) return <Loader />;
   if (user) return <Navigate to="/" replace />;
   return children;
 };
@@ -42,37 +36,31 @@ function App() {
   const dispatch = useDispatch();
   const { isAuthChecked } = useSelector((s) => s.auth);
 
-  // Bootstrap auth on every load
   useEffect(() => {
-    if (!isAuthChecked && localStorage.getItem("token")) {
-      dispatch(fetchUser());
-    }
+    if (!isAuthChecked && localStorage.getItem("token")) dispatch(fetchUser());
   }, [dispatch, isAuthChecked]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen flex flex-col">
       <Navbar />
       <main className="flex-1">
         <Routes>
-          {/* Public routes */}
           <Route
             path="/login"
             element={
-              // <PublicRoute>
-              <Login />
-              // </PublicRoute>
+              <PublicRoute>
+                <Login />
+              </PublicRoute>
             }
           />
           <Route
             path="/signup"
             element={
-              // <PublicRoute>
-              <Signup />
-              // </PublicRoute>
+              <PublicRoute>
+                <Signup />
+              </PublicRoute>
             }
           />
-
-          {/* Protected routes */}
           <Route
             path="/"
             element={
@@ -105,8 +93,6 @@ function App() {
               </PrivateRoute>
             }
           />
-
-          {/* Catch-all */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
